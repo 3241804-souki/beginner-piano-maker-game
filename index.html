@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Advanced Piano Music Maker</title>
+
+<link rel="icon" href="mainlogo.jpg">
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+    font-family:Arial,sans-serif;
+}
+
+body{
+    background:#f4f4f4;
+    padding:15px;
+    color:#222;
+}
+
+.container{
+    max-width:1700px;
+    margin:auto;
+}
+
+header{
+    text-align:center;
+    margin-bottom:20px;
+}
+
+.logo{
+    width:80px;
+    height:80px;
+    object-fit:cover;
+    border-radius:12px;
+    margin-bottom:10px;
+}
+
+.banner{
+    width:100%;
+    max-height:180px;
+    object-fit:cover;
+    border-radius:12px;
+    margin-bottom:15px;
+}
+
+.controls{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    justify-content:center;
+    margin-bottom:20px;
+}
+
+button,select{
+    padding:10px 14px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:bold;
+}
+
+.play-btn{background:#4caf50;color:white;}
+.stop-btn{background:#f44336;color:white;}
+.clear-btn{background:#2196f3;color:white;}
+.save-btn{background:#9c27b0;color:white;}
+.load-btn{background:#ff9800;color:white;}
+
+.control-box{
+    background:white;
+    padding:10px;
+    border-radius:8px;
+}
+
+#piano{
+    display:flex;
+    flex-wrap:wrap;
+    justify-content:center;
+    gap:2px;
+    margin-bottom:20px;
+}
+
+.key{
+    width:58px;
+    height:170px;
+    display:flex;
+    justify-content:center;
+    align-items:flex-end;
+    padding-bottom:10px;
+    cursor:pointer;
+    border:1px solid #333;
+    font-size:12px;
+    font-weight:bold;
+}
+
+.white{
+    background:white;
+    color:black;
+}
+
+.black{
+    background:black;
+    color:white;
+}
+
+.key.active{
+    transform:translateY(4px);
+}
+
+#sequencerWrapper{
+    overflow:auto;
+    background:white;
+    padding:10px;
+    border-radius:12px;
+}
+
+#sequencer{
+    display:grid;
+    gap:1px;
+}
+
+.noteLabel{
+    width:90px;
+    height:30px;
+    background:#ececec;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    font-size:12px;
+    font-weight:bold;
+    position:sticky;
+    left:0;
+    z-index:3;
+}
+
+.cell{
+    width:28px;
+    height:30px;
+    background:white;
+    border:1px solid #ddd;
+    cursor:pointer;
+}
+
+.measure{
+    border-right:3px solid #666 !important;
+}
+
+.noteStart{
+    background:#ffeb3b;
+}
+
+.noteBody{
+    background:#ffd54f;
+}
+
+.playhead{
+    outline:3px solid #ff5722;
+}
+
+.info{
+    margin-top:15px;
+    text-align:center;
+    font-size:14px;
+    line-height:1.6;
+}
+
+input[type=range]{
+    width:120px;
+}
+
+input[type=number]{
+    width:80px;
+    padding:5px;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<header>
+<img src="mainlogo.jpg" class="logo">
+<img src="sublogo.jpg" class="banner">
+
+<h1>Advanced Piano Music Maker</h1>
+
+<p>
+Click a cell to create a note.<br>
+Click and drag right to make the note longer.
+</p>
+
+</header>
+
+<div class="controls">
+
+<button id="playBtn" class="play-btn">▶ Play</button>
+<button id="stopBtn" class="stop-btn">■ Stop</button>
+<button id="clearBtn" class="clear-btn">Clear</button>
+<button id="saveBtn" class="save-btn">Save</button>
+<button id="loadBtn" class="load-btn">Load</button>
+
+<div class="control-box">
+Volume
+<input type="range" id="volume" min="0" max="100" value="50">
+</div>
+
+<div class="control-box">
+BPM
+<input type="number" id="bpm" value="120" min="40" max="300">
+</div>
+
+<div class="control-box">
+Instrument
+<select id="instrument">
+<option value="piano">Piano</option>
+<option value="electric">Electric Piano</option>
+<option value="organ">Organ</option>
+<option value="strings">Strings</option>
+</select>
+</div>
+
+</div>
+
+<div id="piano"></div>
+
+<div id="sequencerWrapper">
+<div id="sequencer"></div>
+</div>
+
+<div class="info">
+Yellow = note start<br>
+Orange = note length extension<br>
+Click a note start again to remove it
+</div>
+
+</div>
+
+<script>
+const STEPS = 64;
+
+const pianoDiv = document.getElementById("piano");
+const sequencer = document.getElementById("sequencer");
+
+let audioContext;
+let playTimer = null;
+let currentStep = 0;
+
+let dragging = false;
+let dragRow = null;
+let dragStart = null;
+
+const notes = [
+"C3","C#3","D3","D#3","E3","F3","F#3","G3","G#3","A3","A#3","B3",
+"C4","C#4","D4","D#4","E4","F4","F#4","G4","G#4","A4","A#4","B4",
+"C5","C#5","D5","D#5","E5","F5","F#5","G5","G#5","A5","A#5","B5"
+];
+
+const frequencies = {};
+const noteData = [];
+
+function createFrequencyMap(){
+
+const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+for(let octave=0; octave<=8; octave++){
+
+for(let i=0;i<12;i++){
+
+const index=(octave*12)+i;
+const a4=(4*12)+9;
+
+frequencies[names[i]+octave]=
+440*Math.pow(2,(index-a4)/12);
+
+}
+
+}
+
+}
+
+createFrequencyMap();
+
+notes.forEach(()=>{
+noteData.push([]);
+});
+
+function initAudio(){
+
+if(!audioContext){
+
+audioContext =
+new(window.AudioContext || window.webkit.AudioContext)();
+
+}
+
+}
+
+function createOsc(type,freq,gain){
+
+const osc = audioContext.createOscillator();
+
+osc.type = type;
+osc.frequency.value = freq;
+
+osc.connect(gain);
+osc.start();
+
+return osc;
+}
+
+function playSound(note,duration){
+
+initAudio();
+
+const instrument =
+document.getElementById("instrument").value;
+
+const gain = audioContext.createGain();
+gain.gain.value =
+document.getElementById("volume").value/100;
+
+gain.connect(audioContext.destination);
+
+const list=[];
+
+if(instrument==="piano"){
+list.push(createOsc("sine",frequencies[note],gain));
+}
+
+if(instrument==="electric"){
+list.push(createOsc("triangle",frequencies[note],gain));
+}
+
+if(instrument==="organ"){
+list.push(createOsc("square",frequencies[note],gain));
+list.push(createOsc("square",frequencies[note]*2,gain));
+}
+
+if(instrument==="strings"){
+list.push(createOsc("sawtooth",frequencies[note],gain));
+list.push(createOsc("triangle",frequencies[note]/2,gain));
+}
+
+gain.gain.exponentialRampToValueAtTime(
+0.0001,
+audioContext.currentTime + duration
+);
+
+list.forEach(osc=>{
+osc.stop(audioContext.currentTime + duration);
+});
+
+}
+
+function buildPiano(){
+
+notes.forEach(note=>{
+
+const key=document.createElement("div");
+
+key.className =
+"key " + (note.includes("#") ? "black":"white");
+
+key.textContent=note;
+
+key.onclick=()=>{
+
+playSound(note,0.5);
+
+key.classList.add("active");
+
+setTimeout(()=>{
+key.classList.remove("active");
+},100);
+
+};
+
+pianoDiv.appendChild(key);
+
+});
+
+}
+
+buildPiano();
+
+function renderSequencer(){
+
+sequencer.innerHTML="";
+
+sequencer.style.gridTemplateColumns =
+"90px repeat("+STEPS+", 28px)";
+
+for(let row=0;row<notes.length;row++){
+
+const label=document.createElement("div");
+label.className="noteLabel";
+label.textContent=notes[row];
+sequencer.appendChild(label);
+
+for(let col=0;col<STEPS;col++){
+
+const cell=document.createElement("div");
+
+cell.className="cell";
+
+if((col+1)%4===0){
+cell.classList.add("measure");
+}
+
+cell.dataset.row=row;
+cell.dataset.col=col;
+
+const note = noteData[row].find(n=>{
+return col >= n.start && col < n.start+n.length;
+});
+
+if(note){
+
+if(col===note.start){
+cell.classList.add("noteStart");
+}else{
+cell.classList.add("noteBody");
+}
+
+}
+
+cell.addEventListener("mousedown",()=>{
+
+dragging=true;
+dragRow=row;
+dragStart=col;
+
+const existing =
+noteData[row].find(n=>n.start===col);
+
+if(existing){
+
+noteData[row] =
+noteData[row].filter(n=>n!==existing);
+
+renderSequencer();
+return;
+}
+
+noteData[row].push({
+start:col,
+length:1
+});
+
+renderSequencer();
+
+});
+
+cell.addEventListener("mouseenter",()=>{
+
+if(!dragging) return;
+if(row!==dragRow) return;
+
+const note =
+noteData[row].find(n=>n.start===dragStart);
+
+if(!note) return;
+
+note.length =
+Math.max(1,(col-dragStart)+1);
+
+renderSequencer();
+
+});
+
+sequencer.appendChild(cell);
+
+}
+
+}
+
+}
+
+document.addEventListener("mouseup",()=>{
+
+dragging=false;
+dragRow=null;
+dragStart=null;
+
+});
+
+renderSequencer();
+
+function clearPlayhead(){
+
+document.querySelectorAll(".playhead")
+.forEach(cell=>{
+cell.classList.remove("playhead");
+});
+
+}
+
+function stopSong(){
+
+clearInterval(playTimer);
+playTimer=null;
+currentStep=0;
+clearPlayhead();
+
+}
+
+function playSong(){
+
+stopSong();
+
+const bpm =
+parseInt(document.getElementById("bpm").value);
+
+const stepTime =
+(60000/bpm)/4;
+
+playTimer=setInterval(()=>{
+
+clearPlayhead();
+
+const cells =
+document.querySelectorAll(".cell");
+
+for(let row=0;row<notes.length;row++){
+
+const visualIndex =
+(row*STEPS)+currentStep;
+
+if(cells[visualIndex]){
+cells[visualIndex].classList.add("playhead");
+}
+
+for(const note of noteData[row]){
+
+if(note.start===currentStep){
+
+playSound(
+notes[row],
+(note.length*stepTime)/1000
+);
+
+}
+
+}
+
+}
+
+currentStep++;
+
+if(currentStep>=STEPS){
+currentStep=0;
+}
+
+},stepTime);
+
+}
+
+document.getElementById("playBtn")
+.addEventListener("click",playSong);
+
+document.getElementById("stopBtn")
+.addEventListener("click",stopSong);
+
+document.getElementById("clearBtn")
+.addEventListener("click",()=>{
+
+stopSong();
+
+for(let i=0;i<noteData.length;i++){
+noteData[i]=[];
+}
+
+renderSequencer();
+
+});
+
+document.getElementById("saveBtn")
+.addEventListener("click",()=>{
+
+localStorage.setItem(
+"advancedPianoSong",
+JSON.stringify(noteData)
+);
+
+alert("Song Saved");
+
+});
+
+document.getElementById("loadBtn")
+.addEventListener("click",()=>{
+
+const data =
+localStorage.getItem("advancedPianoSong");
+
+if(!data){
+alert("No saved song");
+return;
+}
+
+const parsed =
+JSON.parse(data);
+
+for(let i=0;i<notes.length;i++){
+
+noteData[i] =
+parsed[i] || [];
+
+}
+
+renderSequencer();
+
+alert("Song Loaded");
+
+});
+</script>
+
+</body>
+</html>
